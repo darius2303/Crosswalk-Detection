@@ -1,7 +1,3 @@
-# Detectare treceri de pietoni cu OpenCV.
-# Rulare: python src/main.py --image input/example.jpg
-# Rezultatele se salveaza in folderul output.
-
 import argparse
 from pathlib import Path
 
@@ -9,23 +5,35 @@ import cv2
 import numpy as np
 
 
+# Pragurile sunt raportate la dimensiunea imaginii, ca algoritmul sa se
+# adapteze cat de cat la poze mici si mari.
 MIN_STRIPE_AREA_RATIO = 0.00045
+
+# O banda de trecere trebuie sa fie mai lunga decat lata, dar nu acceptam
+# forme exagerat de subtiri care sunt de obicei linii, reflexii sau zgomot.
 MIN_ASPECT_RATIO = 1.6
 MAX_ASPECT_RATIO = 20.0
+
+# O trecere de pietoni este considerata valida doar daca gasim mai multe
+# marcaje compatibile, nu o singura zona alba izolata.
 MIN_STRIPES_FOR_CROSSWALK = 3
+
+# Benzile din aceeasi trecere trebuie sa aiba orientari apropiate.
 ANGLE_TOLERANCE_DEGREES = 18.0
 
+# Structura folosita pentru o banda candidata:
+# (x, y, w, h, center_x, center_y, angle, long_side, short_side, area)
 Stripe = tuple[int, int, int, int, float, float, float, float, float, float]
 
 
 def angle_distance(angle_a: float, angle_b: float) -> float:
-    # Calculeaza diferenta dintre doua unghiuri de linii.
+    """Calculeaza cea mai mica diferenta dintre doua unghiuri de linii."""
     diff = abs(angle_a - angle_b) % 180.0
     return min(diff, 180.0 - diff)
 
 
 def load_image(image_path: str) -> np.ndarray:
-    # Citeste imaginea de la calea primita.
+    """Citeste imaginea de la calea primita si opreste programul daca lipseste."""
     image = cv2.imread(image_path)
 
     if image is None:
@@ -35,7 +43,10 @@ def load_image(image_path: str) -> np.ndarray:
 
 
 def preprocess_image(image: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    # Pregateste imaginea pentru detectia marcajelor albe.
+    """Construieste mastile folosite pentru izolarea marcajelor albe."""
+    # Grayscale ajuta la praguri de luminozitate, HSV separa mai bine
+    # saturatia, iar LAB ofera un canal de luminozitate util pentru threshold
+    # adaptiv in imagini cu umbre.
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
@@ -43,7 +54,8 @@ def preprocess_image(image: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndar
     blurred_gray = cv2.GaussianBlur(gray, (5, 5), 0)
     blurred_l = cv2.GaussianBlur(lab[:, :, 0], (5, 5), 0)
 
-    # Cauta zone albe, luminoase si cu saturatie mica.
+    # Cauta zone albe: luminoase si cu saturatie mica. Combinam un prag global
+    # cu unul local pentru a pastra marcaje vizibile si in zone mai intunecate.
     white_by_color = cv2.inRange(hsv, np.array([0, 0, 105]), np.array([180, 95, 255]))
     _, bright_global = cv2.threshold(blurred_gray, 175, 255, cv2.THRESH_BINARY)
     bright_local = cv2.adaptiveThreshold(
@@ -57,7 +69,8 @@ def preprocess_image(image: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndar
 
     threshold = cv2.bitwise_and(white_by_color, cv2.bitwise_or(bright_local, bright_global))
 
-    # Ignora partea de sus a imaginii.
+    # Ignora partea de sus a imaginii, unde apar cerul, cladiri, masini sau alte
+    # obiecte care pot contine suprafete albe dar nu sunt carosabil.
     height = image.shape[0]
     road_roi = np.zeros_like(threshold)
     road_roi[int(height * 0.22) :, :] = 255
@@ -66,21 +79,24 @@ def preprocess_image(image: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndar
     close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
     open_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 
-    # Uneste zonele albe apropiate.
+    # Inchiderea morfologica uneste fragmente apropiate ale aceluiasi marcaj.
     closed = cv2.morphologyEx(threshold, cv2.MORPH_CLOSE, close_kernel, iterations=1)
 
-    # Elimina zgomotul mic.
+    # Deschiderea morfologica elimina puncte albe mici ramase dupa thresholding.
     cleaned = cv2.morphologyEx(closed, cv2.MORPH_OPEN, open_kernel, iterations=1)
 
     return gray, threshold, cleaned
 
 
 def find_candidate_stripes(mask: np.ndarray) -> list[Stripe]:
-    # Gaseste zone albe care pot fi benzi de trecere.
+    """Gaseste contururi albe care au forma potrivita pentru benzi de trecere."""
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     candidates = []
     image_area = mask.shape[0] * mask.shape[1]
+
+    # Aria minima elimina zgomotul; dimensiunea minima elimina formele alungite,
+    # dar prea mici ca sa fie credibile ca marcaje rutiere.
     min_stripe_area = max(45, image_area * MIN_STRIPE_AREA_RATIO)
     min_dimension = max(8, int(min(mask.shape[:2]) * 0.025))
 
@@ -95,6 +111,8 @@ def find_candidate_stripes(mask: np.ndarray) -> list[Stripe]:
         if w == 0 or h == 0:
             continue
 
+        # minAreaRect estimeaza dreptunghiul rotit al conturului. Din el luam
+        # axa lunga si unghiul, indiferent daca banda este orizontala sau oblica.
         rect = cv2.minAreaRect(contour)
         (center_x, center_y), (stripe_width, stripe_height), angle = rect
         short_side = min(stripe_width, stripe_height)
@@ -107,7 +125,8 @@ def find_candidate_stripes(mask: np.ndarray) -> list[Stripe]:
         long_axis_angle = angle + 90.0 if stripe_width < stripe_height else angle
         long_axis_angle %= 180.0
 
-        # Accepta benzi orizontale, verticale sau oblice.
+        # Accepta benzi orizontale, verticale sau oblice, atata timp cat sunt
+        # suficient de alungite si destul de mari.
         if (
             MIN_ASPECT_RATIO <= aspect_ratio <= MAX_ASPECT_RATIO
             and long_side >= min_dimension
@@ -132,7 +151,7 @@ def find_candidate_stripes(mask: np.ndarray) -> list[Stripe]:
 
 
 def build_stripe_from_contour(contour: np.ndarray) -> Stripe | None:
-    # Creeaza o banda candidata dintr-un contur.
+    """Transforma un contur OpenCV in structura Stripe folosita de algoritm."""
     area = cv2.contourArea(contour)
     x, y, w, h = cv2.boundingRect(contour)
 
@@ -170,7 +189,10 @@ def is_dense_non_road_stripe_texture(
     crosswalk_box: tuple[int, int, int, int] | None,
     stripes: list[Stripe],
 ) -> bool:
-    # Respinge dungi de pe textile, blana sau alte obiecte.
+    """Detecteaza texturi cu dungi care seamana cu o trecere, dar nu sunt drum."""
+    # Filtrul este important pentru imagini precum haine, materiale textile sau
+    # modele alb-negru. Acestea pot avea multe dungi paralele, dar contextul din
+    # jur nu arata ca asfaltul.
     if crosswalk_box is None or not stripes:
         return False
 
@@ -203,6 +225,9 @@ def is_dense_non_road_stripe_texture(
     if context_count == 0:
         return True
 
+    # Contextul "ca de drum" inseamna pixeli fara marcaj, cu saturatie mica si
+    # luminozitate medie. Daca aproape tot fundalul este negru/alb extrem,
+    # probabil privim o textura, nu carosabil.
     road_like_context = (
         context_pixels
         & (saturation < 90)
@@ -231,13 +256,15 @@ def is_dense_non_road_stripe_texture(
     )
     mostly_axis_aligned = vertical_stripes >= max(3, int(len(stripes) * 0.7))
 
-    # Respinge box-urile mari formate din putine dungi rare.
+    # Respinge box-urile mari formate din putine dungi rare, deoarece de obicei
+    # apar din obiecte apropiate de camera sau din suprafete texturate.
     sparse_oversized_detection = (
         box_area_ratio > 0.30
         and len(stripes) <= 4
         and selected_fill_in_box < 0.16
     )
 
+    # Hainele cu dungi pot avea marcaje subtiri, paralele si contrast mare.
     clothing_like_detection = (
         box_area_ratio > 0.12
         and len(stripes) <= 6
@@ -269,13 +296,18 @@ def detect_by_white_marking_density(
     mask: np.ndarray,
     image_shape: tuple[int, ...],
 ) -> tuple[bool, tuple[int, int, int, int] | None, list[Stripe]]:
-    # Fallback pentru marcaje unite, sterse sau slab luminate.
+    """Fallback pentru marcaje unite, sterse sau slab luminate."""
+    # Uneori benzile nu apar ca dreptunghiuri separate dupa thresholding. In
+    # acest caz incercam o detectie mai relaxata, bazata pe densitatea zonelor
+    # albe din partea inferioara a imaginii.
     image_height, image_width = image_shape[:2]
     image_area = image_height * image_width
 
     relaxed = mask.copy()
     relaxed[: int(image_height * 0.18), :] = 0
 
+    # Kernelul de inchidere este dimensionat dupa imagine, ca sa uneasca
+    # fragmente apropiate fara sa transforme toata scena intr-o singura pata.
     join_kernel = cv2.getStructuringElement(
         cv2.MORPH_RECT,
         (max(5, image_width // 45), max(3, image_height // 80)),
@@ -313,6 +345,8 @@ def detect_by_white_marking_density(
     if not components:
         return False, None, []
 
+    # Luam cele mai mari componente fiindca ele sunt cel mai probabil marcaje
+    # rutiere, iar punctele mici ramase sunt zgomot.
     components.sort(key=lambda stripe: stripe[9], reverse=True)
     selected = components[: min(16, len(components))]
 
@@ -334,6 +368,8 @@ def detect_by_white_marking_density(
     width = x_max - x_min
     height = y_max - y_min
 
+    # Zona finala trebuie sa fie suficient de lata si inalta ca sa reprezinte
+    # o trecere vizibila in imagine.
     if width < image_width * 0.12 or height < image_height * 0.035:
         return False, None, []
 
@@ -355,7 +391,7 @@ def group_stripes(
     stripes: list[Stripe],
     image_shape: tuple[int, ...],
 ) -> tuple[bool, tuple[int, int, int, int] | None, list[Stripe]]:
-    # Grupeaza benzile si decide daca formeaza o trecere.
+    """Grupeaza benzile candidate si decide daca formeaza o trecere."""
     if len(stripes) < MIN_STRIPES_FOR_CROSSWALK:
         return False, None, []
 
@@ -364,7 +400,8 @@ def group_stripes(
     max_cluster_height = image_height * 0.48
     max_center_distance = image_width * 0.95
 
-    # Pastreaza marcajele mai importante.
+    # Pastreaza marcajele mai importante. Daca filtrarea devine prea stricta,
+    # revine la lista initiala pentru a nu rata trecerile mai sterse.
     areas = np.array([stripe[9] for stripe in stripes], dtype=np.float32)
     strong_area = max(image_area * MIN_STRIPE_AREA_RATIO, float(np.percentile(areas, 45)) * 0.55)
     filtered = [stripe for stripe in stripes if stripe[9] >= strong_area]
@@ -375,12 +412,16 @@ def group_stripes(
     best_cluster: list[Stripe] = []
     best_score = -1.0
 
+    # Fiecare banda este folosita ca "ancora". Cautam langa ea alte benzi cu
+    # unghi, dimensiune si pozitie compatibile, apoi pastram cel mai bun grup.
     for seed in filtered:
         _, _, _, _, seed_cx, seed_cy, seed_angle, seed_long, _, _ = seed
         theta = np.deg2rad(seed_angle)
         long_axis = np.array([np.cos(theta), np.sin(theta)])
         seed_center = np.array([seed_cx, seed_cy])
         seed_projection = float(seed_center @ long_axis)
+        # Proiectia pe axa lunga ajuta sa grupam benzi care se afla pe aceeasi
+        # directie generala, inclusiv cand trecerea este vazuta in perspectiva.
         axis_tolerance = max(seed_long * 0.55, image_height * 0.09, image_width * 0.06)
 
         cluster = []
@@ -424,6 +465,8 @@ def group_stripes(
 
         angle_penalty = sum(angle_distance(float(angle), float(np.median(angles))) for angle in angles)
         size_penalty = float(np.std(long_sides))
+        # Scorul favorizeaza grupuri cu multe benzi, arie mare si unghiuri
+        # apropiate, dar penalizeaza grupurile prea inalte sau incoerente.
         score = (
             len(cluster) * 80000
             + area_sum * 3.0
@@ -454,7 +497,7 @@ def group_stripes(
     width = x_max - x_min
     height = y_max - y_min
 
-    # Verifica dimensiunea zonei detectate.
+    # Verifica dimensiunea zonei detectate inainte de a adauga padding.
     if width <= 0 or height <= 0:
         return False, None, []
 
@@ -473,7 +516,9 @@ def group_large_road_markings(
     stripes: list[Stripe],
     image_shape: tuple[int, ...],
 ) -> tuple[bool, tuple[int, int, int, int] | None, list[Stripe]]:
-    # Fallback pentru poze cu perspectiva puternica.
+    """Fallback pentru poze cu perspectiva puternica sau marcaje foarte mari."""
+    # In unele imagini apropiate de drum apar doar 2-3 benzi late, iar regula
+    # principala cu minim 3 marcaje similare poate fi prea conservatoare.
     if len(stripes) < 2:
         return False, None, []
 
@@ -485,6 +530,8 @@ def group_large_road_markings(
         x, y, w, h, _, center_y, _, long_side, short_side, area = stripe
         fill_ratio = area / float(w * h)
 
+        # Pastram doar marcaje aflate in zona probabila a drumului si eliminam
+        # formele foarte mari care acopera prea mult din imagine.
         if center_y < image_height * 0.33 or center_y > image_height * 0.88:
             continue
 
@@ -508,6 +555,7 @@ def group_large_road_markings(
     if len(selected) < 2:
         return False, None, []
 
+    # Cele mai mari marcaje contribuie cel mai mult la box-ul final.
     selected.sort(key=lambda stripe: stripe[9], reverse=True)
     selected = selected[:10]
 
@@ -550,17 +598,17 @@ def draw_results(
     detected: bool,
     crosswalk_box: tuple[int, int, int, int] | None,
 ) -> np.ndarray:
-    # Deseneaza rezultatul pe imagine.
+    """Deseneaza pe imagine benzile folosite si rezultatul final."""
     result = image.copy()
 
-    # Verde: benzi candidate.
+    # Verde: benzile candidate care au fost folosite in decizia finala.
     for x, y, w, h, *_ in stripes:
         cv2.rectangle(result, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
     if detected and crosswalk_box is not None:
         x, y, w, h = crosswalk_box
 
-        # Rosu: zona detectata.
+        # Rosu: dreptunghiul care incadreaza trecerea detectata.
         cv2.rectangle(result, (x, y), (x + w, y + h), (0, 0, 255), 3)
 
         cv2.putText(
@@ -589,12 +637,19 @@ def draw_results(
 
 
 def detect_crosswalk(image: np.ndarray) -> dict[str, np.ndarray | list | bool | tuple | None]:
-    # Ruleaza tot procesul de detectie.
+    """Ruleaza tot procesul de detectie si intoarce imaginile intermediare."""
     gray, threshold, cleaned = preprocess_image(image)
     stripes = find_candidate_stripes(cleaned)
+
+    # Incercarea principala cauta mai multe benzi coerente.
     detected, crosswalk_box, selected_stripes = group_stripes(stripes, image.shape)
+
+    # Fallback pentru cazurile in care marcajele sunt mari sau deformate de
+    # perspectiva si nu se potrivesc perfect cu gruparea principala.
     broad_detected, broad_box, broad_stripes = group_large_road_markings(stripes, image.shape)
 
+    # Daca fallback-ul gaseste o zona mai convingatoare, il folosim in locul
+    # rezultatului principal.
     if broad_detected and (
         not detected
         or len(broad_stripes) > len(selected_stripes)
@@ -606,12 +661,16 @@ def detect_crosswalk(image: np.ndarray) -> dict[str, np.ndarray | list | bool | 
     ):
         detected, crosswalk_box, selected_stripes = broad_detected, broad_box, broad_stripes
 
+    # Ultima incercare foloseste densitatea zonelor albe, utila pentru marcaje
+    # rupte, sterse sau unite intr-o singura componenta.
     if not detected:
         detected, crosswalk_box, selected_stripes = detect_by_white_marking_density(
             cleaned,
             image.shape,
         )
 
+    # Dupa detectie aplicam un filtru de siguranta pentru a respinge texturi cu
+    # dungi care nu se afla intr-un context de drum.
     if detected and is_dense_non_road_stripe_texture(
         image,
         cleaned,
@@ -643,11 +702,12 @@ def save_outputs(
     cleaned: np.ndarray,
     result: np.ndarray,
 ) -> None:
-    # Salveaza imaginile rezultate.
+    """Salveaza imaginile intermediare si imaginea finala in folderul de output."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     stem = Path(image_name).stem
 
+    # Prefixele numerice pastreaza ordinea pipeline-ului in folderul rezultat.
     cv2.imwrite(str(output_dir / f"{stem}_01_gray.jpg"), gray)
     cv2.imwrite(str(output_dir / f"{stem}_02_threshold.jpg"), threshold)
     cv2.imwrite(str(output_dir / f"{stem}_03_cleaned_mask.jpg"), cleaned)
@@ -655,7 +715,7 @@ def save_outputs(
 
 
 def parse_arguments() -> argparse.Namespace:
-    # Citeste argumentele din terminal.
+    """Citeste argumentele primite din terminal."""
     parser = argparse.ArgumentParser(
         description="Detectarea trecerilor de pietoni folosind OpenCV."
     )
@@ -676,7 +736,7 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def main() -> None:
-    # Functia principala.
+    """Punctul de intrare al programului."""
     args = parse_arguments()
 
     image_path = Path(args.image)
@@ -684,6 +744,8 @@ def main() -> None:
 
     image = load_image(str(image_path))
 
+    # detect_crosswalk intoarce atat decizia finala, cat si imaginile necesare
+    # pentru a intelege vizual fiecare pas al procesarii.
     detection_result = detect_crosswalk(image)
 
     save_outputs(
