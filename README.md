@@ -1,58 +1,59 @@
 # Crosswalk Detection Using Classical Image Processing Techniques
 
-## 1. Descriere proiect
+## 1. Project Description
 
-Acest proiect detecteaza treceri de pietoni in imagini rutiere folosind tehnici clasice de procesare a imaginilor. Implementarea este realizata in Python cu OpenCV si nu foloseste retele neuronale sau modele antrenate.
+This project detects pedestrian crossings in road images using classical image processing techniques. The implementation is written in Python with OpenCV and does not use neural networks or trained models.
 
-Tema este potrivita pentru zona de computer vision aplicata in domeniul auto, deoarece urmareste identificarea unui element important din infrastructura rutiera: trecerea de pietoni.
+The topic is relevant to applied computer vision in the automotive field because it focuses on identifying an important element of road infrastructure: the pedestrian crossing.
 
-## 2. Obiectiv
+## 2. Objective
 
-Obiectivul proiectului este detectarea automata a unei treceri de pietoni intr-o imagine si evidentierea acesteia pe imaginea originala.
+The objective of the project is to automatically detect a pedestrian crossing in an image and highlight it in the original image.
 
-Programul trebuie sa:
-- citeasca o imagine de intrare;
-- evidentieze marcajele albe de pe carosabil;
-- identifice regiuni dreptunghiulare care pot reprezenta benzile trecerii de pietoni;
-- grupeze benzile detectate;
-- afiseze si salveze rezultatul final.
+The program must:
 
-## 3. Tehnologii folosite
+- read an input image;
+- highlight white road markings;
+- identify rectangular regions that may represent crosswalk stripes;
+- group the detected stripes;
+- display and save the final result.
+
+## 3. Technologies Used
 
 - Python
 - OpenCV
 - NumPy
 
-## 4. Metoda folosita
+## 4. Method
 
-Algoritmul foloseste un pipeline clasic de procesare de imagine:
+The algorithm uses a classical image-processing pipeline:
 
-1. **Citirea imaginii**
-   - Imaginea este incarcata folosind `cv2.imread`.
+1. **Image Loading**
+   - The image is loaded using `cv2.imread`.
 
-2. **Conversie in grayscale**
-   - Imaginea color este transformata intr-o imagine in tonuri de gri pentru procesare mai simpla.
+2. **Grayscale Conversion**
+   - The color image is converted to grayscale for simpler processing.
 
 3. **Gaussian Blur**
-   - Se aplica un filtru Gaussian pentru reducerea zgomotului.
+   - A Gaussian filter is applied to reduce image noise.
 
 4. **Thresholding**
-   - Se extrag zonele luminoase/albe, deoarece marcajele trecerilor de pietoni sunt de obicei albe.
+   - Bright or white regions are extracted because pedestrian crossing markings are usually white.
 
-5. **Operatii morfologice**
-   - Se aplica inchidere si deschidere morfologica pentru a uni regiunile apropiate si pentru a elimina zgomotul.
+5. **Morphological Operations**
+   - Morphological closing and opening are applied to connect nearby regions and remove noise.
 
-6. **Detectia contururilor**
-   - Se cauta contururi in masca binara.
+6. **Contour Detection**
+   - Contours are detected in the binary mask.
 
-7. **Filtrarea benzilor candidate**
-   - Sunt pastrate doar regiunile care au o forma alungita si o arie suficient de mare.
+7. **Candidate Stripe Filtering**
+   - Only regions with an elongated shape and a sufficiently large area are kept.
 
-8. **Estimarea zonei trecerii de pietoni**
-   - Daca exista cel putin trei benzi candidate, se considera ca imaginea contine o trecere de pietoni.
-   - Se construieste un dreptunghi comun peste benzile detectate.
+8. **Crosswalk Area Estimation**
+   - If at least three candidate stripes are detected, the image is considered to contain a pedestrian crossing.
+   - A common bounding rectangle is created around the detected stripes.
 
-## 5. Structura proiectului
+## 5. Project Structure
 
 ```text
 crosswalk_detection_project/
@@ -61,66 +62,66 @@ crosswalk_detection_project/
 │   └── main.py
 │
 ├── input/
-│   └── aici se pun imaginile de test
+│   └── place test images here
 │
 ├── output/
-│   └── aici vor fi salvate rezultatele
+│   └── generated results are saved here
 │
 ├── requirements.txt
 └── README.md
 ```
 
-## 6. Instalare
+## 6. Installation
 
-Creeaza un mediu virtual, optional:
+Create a virtual environment, optionally:
 
 ```bash
 python -m venv venv
 ```
 
-Activeaza mediul virtual:
+Activate the virtual environment.
 
-Pe Windows:
+On Windows:
 
 ```bash
 venv\Scripts\activate
 ```
 
-Pe Linux/macOS:
+On Linux/macOS:
 
 ```bash
 source venv/bin/activate
 ```
 
-Instaleaza dependintele:
+Install the dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 7. Rulare
+## 7. Running the Project
 
-Pune o imagine in folderul `input`, de exemplu:
+Place an image in the `input` directory, for example:
 
 ```text
 input/crosswalk.jpg
 ```
 
-Ruleaza programul:
+Run the program:
 
 ```bash
 python src/main.py --image input/crosswalk.jpg
 ```
 
-Sau poti specifica si folderul de output:
+You can also specify the output directory:
 
 ```bash
 python src/main.py --image input/crosswalk.jpg --output output
 ```
 
-## 8. Rezultate generate
+## 8. Generated Results
 
-Pentru o imagine numita `crosswalk.jpg`, programul va genera:
+For an image named `crosswalk.jpg`, the program generates:
 
 ```text
 output/crosswalk_01_gray.jpg
@@ -129,41 +130,43 @@ output/crosswalk_03_cleaned_mask.jpg
 output/crosswalk_04_result.jpg
 ```
 
-Imaginea finala este:
+The final image is:
 
 ```text
 crosswalk_04_result.jpg
 ```
 
-Aceasta contine:
-- dreptunghiuri verzi pentru benzile candidate;
-- dreptunghi rosu pentru zona finala detectata;
-- textul `Crosswalk detected` daca detectia a reusit.
+It contains:
 
-## 9. Avantaje
+- green rectangles around candidate stripes;
+- a red rectangle around the final detected area;
+- the text `Crosswalk detected` when the detection is successful.
 
-- Implementare simpla si usor de explicat.
-- Nu necesita dataset mare sau antrenare AI.
-- Rezultatele sunt vizuale si usor de inclus intr-o prezentare.
-- Foloseste concepte importante din procesarea imaginilor.
+## 9. Advantages
 
-## 10. Limitari
+- Simple implementation that is easy to understand and explain.
+- Does not require a large dataset or AI model training.
+- Produces visual results that are easy to include in a presentation.
+- Uses important image-processing concepts.
 
-Algoritmul poate avea probleme in urmatoarele situatii:
-- trecerea de pietoni este foarte stearsa;
-- imaginea are umbre puternice;
-- marcajele sunt acoperite de masini sau pietoni;
-- unghiul camerei este foarte diferit;
-- exista alte marcaje albe similare in imagine.
+## 10. Limitations
 
-## 11. Posibile imbunatatiri
+The algorithm may encounter difficulties in the following situations:
 
-- Folosirea spatiului de culoare HSV pentru segmentarea mai buna a albului.
-- Aplicarea transformatei Hough pentru detectarea liniilor paralele.
-- Adaugarea unei regiuni de interes pentru a analiza doar zona carosabilului.
-- Procesarea unui video frame cu frame.
-- Integrarea unui model de object detection pentru rezultate mai robuste.
+- the pedestrian crossing is heavily faded;
+- the image contains strong shadows;
+- the markings are covered by vehicles or pedestrians;
+- the camera angle is significantly different;
+- other similar white road markings are present in the image.
 
-## 12. Concluzie
+## 11. Possible Improvements
 
-Proiectul demonstreaza cum pot fi utilizate tehnici clasice de computer vision pentru detectarea trecerilor de pietoni. Chiar daca metoda nu foloseste inteligenta artificiala, aceasta poate oferi rezultate bune in imagini clare si reprezinta o baza utila pentru sisteme de asistenta rutiera sau aplicatii smart city.
+- Use the HSV color space for more accurate white-color segmentation.
+- Apply the Hough transform to detect parallel lines.
+- Add a region of interest to analyze only the road area.
+- Process video frame by frame.
+- Integrate an object detection model for more robust results.
+
+## 12. Conclusion
+
+This project demonstrates how classical computer vision techniques can be used to detect pedestrian crossings. Although the method does not use artificial intelligence, it can produce good results on clear images and provides a useful foundation for driver-assistance systems or smart-city applications.
